@@ -238,27 +238,57 @@ impl<'src> ServerOutput<'src> {
 		self.push_line("reliable.OnServerEvent:Connect(function(player, buff, inst)");
 		self.indent();
 
+		self.push_line("player_buffer_queue[player] = player_buffer_queue[player] or {}");
+		self.push_line("if #player_buffer_queue[player] >= 50 then");
+		self.indent();
+		// self.push_line("player:Kick(\"Exceeded reliable event queue limit\")");
+		self.push_line("error(`{player.Name} exceeded reliable event queue limit, dropping batch!`)");
+		self.push_line("return");
+		self.dedent();
+		self.push_line("end");
+		self.push_line("table.insert(player_buffer_queue[player], { buff = buff, inst = inst })");
+		self.push("\n");
+		self.push_line("if not player_buffer_loop_status[player] then");
+		self.indent();
+		self.push_line("player_buffer_loop_status[player] = true");
+		self.push_line("while player and player.Parent and player_buffer_queue[player] and #player_buffer_queue[player] > 0 do");
+		self.indent();
+		self.push_line("local entry = table.remove(player_buffer_queue[player], 1)");
+		self.push_line("incoming_buff = entry.buff");
+		self.push_line("incoming_inst = entry.inst");
+		self.push_line("incoming_read = 0");
+		self.push_line("incoming_ipos = 0");
+		self.push("\n");
+
 		if self.config.include_profile_labels {
 			self.push_line("debug.profilebegin(\"Zap Reliable OnServerEvent\")");
 		}
 
-		self.push_line("incoming_buff = buff");
-		self.push_line("incoming_inst = inst");
-		self.push_line("incoming_read = 0");
-		self.push_line("incoming_ipos = 0");
-
-		self.push_line("local len = buffer.len(buff)");
-		self.push_line("while incoming_read < len do");
-
+		self.push_line("local buf = entry.buff");
+		self.push_line("local pos = 0");
+		self.push_line("local len = buffer.len(buf)");
+		self.push_line("while pos < len do");
 		self.indent();
+		self.push_line("if not player or not player.Parent then");
+		self.indent();
+		self.push_line("return");
+		self.dedent();
+		self.push_line("end");
+		self.push_line("if pos > 0 and pos % 256 == 0 then");
+		self.indent();
+		self.push_line("game:GetService(\"RunService\").Heartbeat:Wait()");
+		self.dedent();
+		self.push_line("end");
+		self.push("\n");
 
 		let server_reliable_ty = self.config.server_reliable_ty();
 
 		self.push_line(&format!(
-			"local id = buffer.read{}(buff, read({}))",
+			"local id = buffer.read{}(buf, read({}))",
 			server_reliable_ty,
 			server_reliable_ty.size()
 		));
+		self.push_line(&format!("pos = pos + {}", server_reliable_ty.size()));
 	}
 
 	fn get_values(&self, parameters: &[Parameter]) -> String {
@@ -582,6 +612,7 @@ impl<'src> ServerOutput<'src> {
 		self.push_line("error(\"Unknown event id\")");
 		self.dedent();
 		self.push_line("end");
+		// end `while pos < len do`
 		self.dedent();
 		self.push_line("end");
 
@@ -589,6 +620,14 @@ impl<'src> ServerOutput<'src> {
 			self.push_line("debug.profileend()");
 		}
 
+		// end `while PlayerBufferQueue[player] and ... do`
+		self.dedent();
+		self.push_line("end");
+		self.push_line("player_buffer_loop_status[player] = nil");
+		// end `if not PlayerBufferLoopStatus[player] then`
+		self.dedent();
+		self.push_line("end");
+		// end `reliable.OnServerEvent:Connect(function(player, buff, inst)`
 		self.dedent();
 		self.push_line("end)");
 	}
@@ -1589,6 +1628,8 @@ impl<'src> ServerOutput<'src> {
 
 	pub fn push_player_map(&mut self) {
 		self.push_line("local player_map = {}");
+		self.push_line("local player_buffer_queue = {}");
+		self.push_line("local player_buffer_loop_status = {}");
 		self.push("\n");
 		self.push_line("local function load_player(player: Player)");
 		self.indent();
@@ -1607,6 +1648,8 @@ impl<'src> ServerOutput<'src> {
 		self.push_line("Players.PlayerRemoving:Connect(function(player)");
 		self.indent();
 		self.push_line("player_map[player] = nil");
+		self.push_line("player_buffer_queue[player] = nil");
+		self.push_line("player_buffer_loop_status[player] = nil");
 		self.dedent();
 		self.push_line("end)");
 	}
