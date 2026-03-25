@@ -264,17 +264,15 @@ impl<'src> ServerOutput<'src> {
 			self.push_line("debug.profilebegin(\"Zap Reliable OnServerEvent\")");
 		}
 
-		self.push_line("local buf = entry.buff");
-		self.push_line("local pos = 0");
-		self.push_line("local len = buffer.len(buf)");
-		self.push_line("while pos < len do");
+		self.push_line("local len = buffer.len(entry.buff)");
+		self.push_line("while incoming_read < len do");
 		self.indent();
 		self.push_line("if not player or not player.Parent then");
 		self.indent();
 		self.push_line("return");
 		self.dedent();
 		self.push_line("end");
-		self.push_line("if pos > 0 and pos % 256 == 0 then");
+		self.push_line("if incoming_read > 0 and incoming_read % 256 == 0 then");
 		self.indent();
 		self.push_line("game:GetService(\"RunService\").Heartbeat:Wait()");
 		self.dedent();
@@ -284,11 +282,10 @@ impl<'src> ServerOutput<'src> {
 		let server_reliable_ty = self.config.server_reliable_ty();
 
 		self.push_line(&format!(
-			"local id = buffer.read{}(buf, read({}))",
+			"local id = buffer.read{}(incoming_buff, read({}))",
 			server_reliable_ty,
 			server_reliable_ty.size()
 		));
-		self.push_line(&format!("pos = pos + {}", server_reliable_ty.size()));
 	}
 
 	fn get_values(&self, parameters: &[Parameter]) -> String {
