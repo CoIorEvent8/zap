@@ -125,6 +125,7 @@ jobs:
         run: |
           wasm-pack build zap
           wasm-pack pack zap
+          ls zap/pkg/
 
       - name: Upload Archive to Release
         uses: softprops/action-gh-release@v2
