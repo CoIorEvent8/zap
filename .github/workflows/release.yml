@@ -14,7 +14,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # https://doc.rust-lang.org/rustc/platform-support.html
         include:
           - host: linux
             os: ubuntu-latest
@@ -77,12 +76,15 @@ jobs:
             zip ../release.zip *
           fi
 
+      - name: Rename Archive
+        shell: bash
+        run: mv release.zip ${{ env.BIN }}-${{ env.PROJECT_VERSION }}-${{ matrix.label }}.zip
+
       - name: Upload Archive to Release
         uses: softprops/action-gh-release@v2
         with:
           draft: true
-          files: release.zip
-          name: ${{ env.BIN }}-${{ env.PROJECT_VERSION }}-${{ matrix.label }}.zip
+          files: ${{ env.BIN }}-${{ env.PROJECT_VERSION }}-${{ matrix.label }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -90,7 +92,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.BIN }}-${{ env.PROJECT_VERSION }}-${{ matrix.label }}.zip
-          path: release.zip
+          path: ${{ env.BIN }}-${{ env.PROJECT_VERSION }}-${{ matrix.label }}.zip
 
   build-wasm:
     name: Build WASM
@@ -129,7 +131,6 @@ jobs:
         with:
           draft: true
           files: zap/pkg/${{ env.BIN }}-${{ env.PROJECT_VERSION }}.tgz
-          name: ${{ env.BIN }}-${{ env.PROJECT_VERSION }}-wasm.tgz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
