@@ -204,6 +204,8 @@ impl<'src> ServerOutput<'src> {
 			self.push_line("debug.profilebegin(\"Zap Send Events\")");
 		}
 
+		self.push_line("process_incoming()");
+		self.push("\n");
 		self.push_line("for player, outgoing in player_map do");
 		self.indent();
 		self.push_line("if outgoing.used > 0 then");
@@ -238,43 +240,70 @@ impl<'src> ServerOutput<'src> {
 		self.push_line("reliable.OnServerEvent:Connect(function(player, buff, inst)");
 		self.indent();
 
-		self.push_line("player_buffer_queue[player] = player_buffer_queue[player] or {}");
-		self.push_line("if #player_buffer_queue[player] >= 50 then");
+		self.push_line("local len = buffer.len(buff)");
+		self.push_line("local acc = player_incoming[player]");
+		self.push_line("if not acc then");
 		self.indent();
-		// self.push_line("player:Kick(\"Exceeded reliable event queue limit\")");
-		self.push_line("error(`{player.Name} exceeded reliable event queue limit, dropping batch!`)");
-		self.push_line("return");
+		self.push_line("local size = math.max(64, len)");
+		self.push_line("acc = { buff = buffer.create(size), used = 0, read = 0, size = size, inst = {} }");
+		self.push_line("player_incoming[player] = acc");
 		self.dedent();
 		self.push_line("end");
-		self.push_line("table.insert(player_buffer_queue[player], { buff = buff, inst = inst })");
 		self.push("\n");
-		self.push_line("if not player_buffer_loop_status[player] then");
+		self.push_line("if acc.used + len > acc.size then");
 		self.indent();
-		self.push_line("player_buffer_loop_status[player] = true");
-		self.push_line("while player and player.Parent and player_buffer_queue[player] and #player_buffer_queue[player] > 0 do");
-		self.indent();
-		self.push_line("local entry = table.remove(player_buffer_queue[player], 1)");
-		self.push_line("incoming_buff = entry.buff");
-		self.push_line("incoming_inst = entry.inst");
-		self.push_line("incoming_read = 0");
-		self.push_line("incoming_ipos = 0");
+		self.push_line("local new_size = math.max(acc.size * 2, acc.used + len)");
+		self.push_line("local new_buff = buffer.create(new_size)");
+		self.push_line("buffer.copy(new_buff, 0, acc.buff, 0, acc.used)");
+		self.push_line("acc.buff = new_buff");
+		self.push_line("acc.size = new_size");
+		self.dedent();
+		self.push_line("end");
 		self.push("\n");
+		self.push_line("buffer.copy(acc.buff, acc.used, buff, 0, len)");
+		self.push_line("acc.used += len");
+		self.push("\n");
+		self.push_line("for _, v in inst do");
+		self.indent();
+		self.push_line("table.insert(acc.inst, v)");
+		self.dedent();
+		self.push_line("end");
+
+		// Close the OnServerEvent handler — event dispatch happens in SendEvents on Heartbeat
+		self.dedent();
+		self.push_line("end)\n");
+
+		// Now emit the per-player dispatch loop, called from SendEvents
+		self.push_line("local function process_incoming()");
+		self.indent();
 
 		if self.config.include_profile_labels {
 			self.push_line("debug.profilebegin(\"Zap Reliable OnServerEvent\")");
 		}
 
-		self.push_line("local len = buffer.len(entry.buff)");
-		self.push_line("while incoming_read < len do");
+		self.push_line("for player, acc in player_incoming do");
+		self.indent();
+		self.push_line("if acc.read >= acc.used then continue end");
+		self.push("\n");
+		self.push_line("incoming_buff = acc.buff");
+		self.push_line("incoming_inst = acc.inst");
+		self.push_line("incoming_read = acc.read");
+		self.push_line("incoming_ipos = 0");
+		self.push("\n");
+		self.push_line("local budget = acc.read + 1400");
+		self.push("\n");
+		self.push_line("local dropped = false");
+		self.push_line("while incoming_read < acc.used do");
 		self.indent();
 		self.push_line("if not player or not player.Parent then");
 		self.indent();
-		self.push_line("return");
+		self.push_line("dropped = true");
+		self.push_line("break");
 		self.dedent();
 		self.push_line("end");
-		self.push_line("if incoming_read > 0 and incoming_read % 256 == 0 then");
+		self.push_line("if incoming_read >= budget then");
 		self.indent();
-		self.push_line("game:GetService(\"RunService\").Heartbeat:Wait()");
+		self.push_line("break");
 		self.dedent();
 		self.push_line("end");
 		self.push("\n");
@@ -609,7 +638,31 @@ impl<'src> ServerOutput<'src> {
 		self.push_line("error(\"Unknown event id\")");
 		self.dedent();
 		self.push_line("end");
-		// end `while pos < len do`
+		// end `while incoming_read < acc.used do`
+		self.dedent();
+		self.push_line("end");
+		self.push("\n");
+		// drop entire batch if player left, otherwise save read cursor
+		self.push_line("if dropped then");
+		self.indent();
+		self.push_line("warn(`[ZAP] {player.Name} left with {acc.used - acc.read} bytes unprocessed, dropping batch`)");
+		self.push_line("acc.read = 0");
+		self.push_line("acc.used = 0");
+		self.push_line("acc.inst = {}");
+		self.dedent();
+		self.push_line("else");
+		self.indent();
+		self.push_line("acc.read = incoming_read");
+		self.push_line("if acc.read >= acc.used then");
+		self.indent();
+		self.push_line("acc.read = 0");
+		self.push_line("acc.used = 0");
+		self.push_line("acc.inst = {}");
+		self.dedent();
+		self.push_line("end");
+		self.dedent();
+		self.push_line("end");
+		// end `for player, acc in player_incoming do`
 		self.dedent();
 		self.push_line("end");
 
@@ -617,16 +670,9 @@ impl<'src> ServerOutput<'src> {
 			self.push_line("debug.profileend()");
 		}
 
-		// end `while PlayerBufferQueue[player] and ... do`
+		// end `local function process_incoming()`
 		self.dedent();
-		self.push_line("end");
-		self.push_line("player_buffer_loop_status[player] = nil");
-		// end `if not PlayerBufferLoopStatus[player] then`
-		self.dedent();
-		self.push_line("end");
-		// end `reliable.OnServerEvent:Connect(function(player, buff, inst)`
-		self.dedent();
-		self.push_line("end)");
+		self.push_line("end\n");
 	}
 
 	fn push_reliable(&mut self) {
@@ -1625,8 +1671,7 @@ impl<'src> ServerOutput<'src> {
 
 	pub fn push_player_map(&mut self) {
 		self.push_line("local player_map = {}");
-		self.push_line("local player_buffer_queue = {}");
-		self.push_line("local player_buffer_loop_status = {}");
+		self.push_line("local player_incoming = {}");
 		self.push("\n");
 		self.push_line("local function load_player(player: Player)");
 		self.indent();
@@ -1645,8 +1690,7 @@ impl<'src> ServerOutput<'src> {
 		self.push_line("Players.PlayerRemoving:Connect(function(player)");
 		self.indent();
 		self.push_line("player_map[player] = nil");
-		self.push_line("player_buffer_queue[player] = nil");
-		self.push_line("player_buffer_loop_status[player] = nil");
+		self.push_line("player_incoming[player] = nil");
 		self.dedent();
 		self.push_line("end)");
 	}
