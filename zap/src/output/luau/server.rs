@@ -269,11 +269,12 @@ impl<'src> ServerOutput<'src> {
 		self.dedent();
 		self.push_line("end");
 
-		// Close the OnServerEvent handler — event dispatch happens in SendEvents on Heartbeat
+		// Close the OnServerEvent handler — event dispatch happens in process_incoming on Heartbeat
 		self.dedent();
 		self.push_line("end)\n");
+	}
 
-		// Now emit the per-player dispatch loop, called from SendEvents
+	fn push_process_incoming_header(&mut self) {
 		self.push_line("local function process_incoming()");
 		self.indent();
 
@@ -686,6 +687,7 @@ impl<'src> ServerOutput<'src> {
 		{
 			if first {
 				self.push_reliable_header();
+				self.push_process_incoming_header();
 			}
 			self.push_reliable_callback(first, ev);
 			first = false;
@@ -694,6 +696,7 @@ impl<'src> ServerOutput<'src> {
 		for fndecl in self.config.fndecls().iter() {
 			if first {
 				self.push_reliable_header();
+				self.push_process_incoming_header();
 			}
 			self.push_fn_callback(first, fndecl);
 			first = false;
@@ -1717,11 +1720,11 @@ impl<'src> ServerOutput<'src> {
 
 		self.push_tydecls();
 
-		self.push_event_loop();
-
 		self.push_callback_lists();
 
 		self.push_reliable();
+
+		self.push_event_loop();
 
 		self.push_unreliable();
 
