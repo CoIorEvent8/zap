@@ -285,6 +285,14 @@ impl<'src> ServerOutput<'src> {
 		self.push_line("for player, acc in player_incoming do");
 		self.indent();
 		self.push_line("if acc.read >= acc.used then continue end");
+		self.push_line("if not player or not player.Parent then");
+		self.indent();
+		self.push_line("acc.read = 0");
+		self.push_line("acc.used = 0");
+		self.push_line("acc.inst = {}");
+		self.push_line("continue");
+		self.dedent();
+		self.push_line("end");
 		self.push("\n");
 		self.push_line("incoming_buff = acc.buff");
 		self.push_line("incoming_inst = acc.inst");
@@ -293,15 +301,10 @@ impl<'src> ServerOutput<'src> {
 		self.push("\n");
 		self.push_line("local budget = acc.read + 1400");
 		self.push("\n");
-		self.push_line("local dropped = false");
+		self.push_line("local ok, err = pcall(function()");
+		self.indent();
 		self.push_line("while incoming_read < acc.used do");
 		self.indent();
-		self.push_line("if not player or not player.Parent then");
-		self.indent();
-		self.push_line("dropped = true");
-		self.push_line("break");
-		self.dedent();
-		self.push_line("end");
 		self.push_line("if incoming_read >= budget then");
 		self.indent();
 		self.push_line("break");
@@ -525,7 +528,7 @@ impl<'src> ServerOutput<'src> {
 			));
 		}
 
-		self.push_line("local call_id = buffer.readu8(buff, read(1))");
+		self.push_line("local call_id = buffer.readu8(incoming_buff, read(1))");
 
 		let values = self.get_values(&fndecl.args);
 
@@ -642,25 +645,27 @@ impl<'src> ServerOutput<'src> {
 		// end `while incoming_read < acc.used do`
 		self.dedent();
 		self.push_line("end");
+		// end pcall function
+		self.dedent();
+		self.push_line("end)");
 		self.push("\n");
-		// drop entire batch if player left, otherwise save read cursor
-		self.push_line("if dropped then");
+		self.push_line("if not ok then");
 		self.indent();
-		self.push_line("warn(`[ZAP] {player.Name} left with {acc.used - acc.read} bytes unprocessed, dropping batch`)");
+		self.push_line("warn(`[ZAP] Error processing incoming events for {player.Name}: {err}`)");
 		self.push_line("acc.read = 0");
 		self.push_line("acc.used = 0");
 		self.push_line("acc.inst = {}");
+		self.push_line("continue");
 		self.dedent();
-		self.push_line("else");
-		self.indent();
+		self.push_line("end");
+		self.push("\n");
+		// save read cursor, reset buffer if fully consumed
 		self.push_line("acc.read = incoming_read");
 		self.push_line("if acc.read >= acc.used then");
 		self.indent();
 		self.push_line("acc.read = 0");
 		self.push_line("acc.used = 0");
 		self.push_line("acc.inst = {}");
-		self.dedent();
-		self.push_line("end");
 		self.dedent();
 		self.push_line("end");
 		// end `for player, acc in player_incoming do`
